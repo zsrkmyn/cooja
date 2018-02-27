@@ -47,6 +47,8 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.FileReader;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
@@ -54,6 +56,7 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.regex.PatternSyntaxException;
+import java.lang.System;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
@@ -86,6 +89,9 @@ import org.contikios.cooja.ClassDescription;
 import org.contikios.cooja.Cooja;
 import org.contikios.cooja.HasQuickHelp;
 import org.contikios.cooja.Mote;
+import org.contikios.cooja.MoteInterfaceHandler;
+import org.contikios.cooja.mote.memory.MemoryInterface;
+import org.contikios.cooja.MoteType;
 import org.contikios.cooja.Plugin;
 import org.contikios.cooja.PluginType;
 import org.contikios.cooja.SimEventCentral.LogOutputEvent;
@@ -95,6 +101,7 @@ import org.contikios.cooja.VisPlugin;
 import org.contikios.cooja.dialogs.TableColumnAdjuster;
 import org.contikios.cooja.dialogs.UpdateAggregator;
 import org.contikios.cooja.util.ArrayQueue;
+
 
 /**
  * A simple mote log listener.
@@ -231,6 +238,7 @@ public class LogListener extends VisPlugin implements HasQuickHelp {
     fileMenu.add(new JMenuItem(saveAction));
     appendCheckBox = new JCheckBoxMenuItem(appendAction);
     fileMenu.add(appendCheckBox);
+    fileMenu.add(new JMenuItem(readAction));
 
     colorCheckbox = new JCheckBoxMenuItem("Mote-specific coloring", backgroundColors);
     showMenu.add(colorCheckbox);
@@ -739,6 +747,61 @@ public class LogListener extends VisPlugin implements HasQuickHelp {
       }
     }
   }
+
+  private class FakeMote implements org.contikios.cooja.Mote {
+    public int getID() { return 1; }
+    public MoteInterfaceHandler getInterfaces() { return null; }
+    public MemoryInterface getMemory() { return null; }
+    public MoteType getType() { return null; }
+    public Simulation getSimulation() { return simulation; }
+    public Collection<Element> getConfigXML() { return null; }
+    public boolean setConfigXML(Simulation simulation,
+        Collection<Element> configXML, boolean visAvailable)
+    {
+      return true;
+    }
+    public void removed() {}
+    public void setProperty(String key, Object obj) {}
+    public Object getProperty(String key) { return null; }
+  }
+
+  private Action readAction = new AbstractAction("Read from file") {
+
+    public void actionPerformed(ActionEvent e) {
+      JFileChooser fc = new JFileChooser();
+      int ret = fc.showOpenDialog(Cooja.getTopParentContainer());
+      if (ret != JFileChooser.APPROVE_OPTION) {
+        return;
+      }
+      org.contikios.cooja.MoteType[] types = simulation.getMoteTypes();
+      File f = fc.getSelectedFile();
+      final BufferedReader reader;
+      final Mote mote = new FakeMote();
+      try {
+        reader = new BufferedReader(new FileReader(f));
+      } catch (Exception ex) {
+        logger.fatal("Could not open file: " + f);
+        return;
+      }
+      Thread readInput = new Thread(new Runnable() {
+        public void run() {
+          String line;
+          try {
+            while ((line = reader.readLine()) != null) {
+              LogOutputEvent ev = new LogOutputEvent(mote, System.currentTimeMillis(), line);
+              registerNewLogOutput(ev);
+            }
+          } catch (Exception ex) {
+            logger.fatal("Could not readline");
+            return;
+          }
+          LogOutputEvent ev = new LogOutputEvent(mote, System.currentTimeMillis(), "----end----");
+          registerNewLogOutput(ev);
+        }
+      });
+      readInput.start();
+    }
+  };
 
   private Action saveAction = new AbstractAction("Save to file") {
     private static final long serialVersionUID = -4140706275748686944L;
